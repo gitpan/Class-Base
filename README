@@ -1,0 +1,153 @@
+NAME
+    Class::Base - useful base class for deriving other modules
+
+SYNOPSIS
+        package My::Funky::Module;
+        use base qw( Class::Base );
+
+        sub init {
+            my ($self, $config) = @_;
+
+            # to indicate a failure
+            return $self->error('bad constructor!');
+
+            # or to indicate general happiness and well-being
+            return $self;
+        }
+
+        package main;
+
+        my $object = My::Funky::Module->new( foo => 'bar', ... )
+              || die My::Funky::Module->error();
+
+DESCRIPTION
+    This module implements a simple base class from which other modules can
+    be derived, thereby inheriting a number of useful methods.
+
+    For a number of years, I found myself re-writing this module for
+    practically every Perl project of any significant size. Or rather, I
+    would copy the module from the last project and perform a global search
+    and replace to change the names. Eventually, I decided to Do The Right
+    Thing and release it as a module in it's own right.
+
+    It defines a base class which implements a number of useful methods like
+    new(), init() and error(). Eventually, you will be able to mix-in other
+    base class module to provide additional functionality to your objects in
+    an easy and consistent manner. I just haven't got around to releasing
+    those modules... yet.
+
+    This module is what object-oriented afficionados would describe as an
+    "abstract base class". That means that it's not designed to be used as a
+    stand-alone module, rather as something from which you derive your own
+    modules. Like this:
+
+        package My::Funky::Module
+        use base qw( Class::Base );
+
+    You can then use it like this:
+
+        use My::Funky::Module;
+
+        my $module = My::Funky::Module->new();
+
+    If you want to apply any per-object initialisation, then simply write an
+    init() method. This gets called by the new() method which passes a
+    reference to a hash reference of configuration options.
+
+        sub init {
+            my ($self, $config) = @_;
+
+            ...
+
+            return $self;
+        }
+
+    When you create new objects using the new() method you can either pass a
+    hash reference or list of named arguments. The new() method does the
+    right thing to fold named arguments into a hash reference for passing to
+    the init() method. Thus, the following are equivalent:
+
+        # hash reference
+        my $module = My::Funky::Module->new({ 
+            foo => 'bar', 
+            wiz => 'waz',
+        });
+
+        # list of named arguments (no enclosing '{' ... '}')
+        my $module = My::Funky::Module->new(
+            foo => 'bar', 
+            wiz => 'waz'
+        );
+
+    The init() method should return $self to indicate success or undef to
+    indicate a failure. You can use the error() method to report an error
+    within the init() method. The error() method returns undef, so you can
+    use it like this:
+
+        sub init {
+            my ($self, $config) = @_;
+
+            # let's make 'foobar' a mandatory argument
+            $self->{ foobar } = $config->{ foobar }
+                || return $self->error("no foobar argument");
+
+            return $self;
+        }
+
+    When you create objects of this class via new(), you should now check
+    the return value. If undef is returned then the error message can be
+    retrieved by calling error() as a class method.
+
+        my $module = My::Funky::Module->new()
+              || die My::Funky::Module->error();
+
+    Alternately, you can inspect the $ERROR package variable which will
+    contain the same error message.
+
+        my $module = My::Funky::Module->new()
+             || die $My::Funky::Module::ERROR;
+
+    Of course, being a conscientious Perl programmer, you will want to be
+    sure that the $ERROR package variable is correctly defined.
+
+        package My::Funky::Module
+        use base qw( Class::Base );
+        use vars qw( $ERROR );
+
+    You can also call error() as an object method. If you pass an argument
+    then it will be used to set the internal error message for the object
+    and return undef. Typically this is used within the module methods to
+    report errors.
+
+        sub another_method {
+            my $self = shift;
+
+            ...
+
+            # set the object error
+            return $self->error('something bad happened');
+        }
+
+    If you don't pass an argument then the error() method returns the
+    current error value. Typically this is called from outside the object to
+    determine its status. For example:
+
+        my $object = My::Funky::Module->new()
+            || die My::Funky::Module->error();
+
+        $object->another_method()
+            || die $object->error();
+
+AUTHOR
+    Andy Wardley <abw@kfs.org>
+
+HISTORY
+    This module began life as the Template::Base module distributed as part
+    of the Template Toolkit.
+
+COPYRIGHT
+    Copyright (C) 1996-2002 Andy Wardley. All Rights Reserved.
+
+    This module is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
+
