@@ -6,12 +6,16 @@ SYNOPSIS
         use base qw( Class::Base );
 
         # custom initialiser method
-
         sub init {
             my ($self, $config) = @_;
 
+            # copy various params into $self
+            $self->params($config, qw( FOO BAR BAZ ))
+                || return undef;
+
             # to indicate a failure
-            return $self->error('bad constructor!');
+            return $self->error('bad constructor!') 
+                if $something_bad;
 
             # or to indicate general happiness and well-being
             return $self;
@@ -35,19 +39,75 @@ SYNOPSIS
 
 DESCRIPTION
     This module implements a simple base class from which other modules can
-    be derived, thereby inheriting a number of useful methods.
+    be derived, thereby inheriting a number of useful methods such as
+    "new()", "init()", "params()", "clone()", "error()" and "debug()".
 
     For a number of years, I found myself re-writing this module for
     practically every Perl project of any significant size. Or rather, I
     would copy the module from the last project and perform a global search
-    and replace to change the names. Eventually, I decided to Do The Right
-    Thing and release it as a module in it's own right.
+    and replace to change the names. Each time it got a little more polished
+    and eventually, I decided to Do The Right Thing and release it as a
+    module in it's own right.
 
-    It defines a base class which implements a number of useful methods like
-    "new()", "init()", "clone()" and "error()". Eventually, you will be able
-    to mix-in other base class module to provide additional functionality to
-    your objects in an easy and consistent manner. I just haven't got around
-    to releasing those modules... yet.
+    It doesn't pretend to be an all-encompassing solution for every kind of
+    object creation problem you might encounter. In fact, it only supports
+    blessed hash references that are created using the popular, but by no
+    means universal convention of calling "new()" with a list or reference
+    to a hash array of named parameters. Constructor failure is indicated by
+    returning undef and setting the "$ERROR" package variable in the
+    module's class to contain a relevant message (which you can also fetch
+    by calling "error()" as a class method).
+
+    e.g.
+
+        my $object = My::Module->new( 
+            file => 'myfile.html',
+            msg  => 'Hello World'
+        ) || die $My::Module::ERROR;
+
+    or:
+
+        my $object = My::Module->new({
+            file => 'myfile.html',
+            msg  => 'Hello World',
+        }) || die My::Module->error();
+
+    The "new()" method handles the conversion of a list of arguments into a
+    hash array and calls the "init()" method to perform any initialisation.
+    In many cases, it is therefore sufficient to define a module like so:
+
+        package My::Module;
+        use Class::Base;
+        use base qw( Class::Base );
+
+        sub init {
+            my ($self, $config) = @_;
+            # copy some config items into $self
+            $self->params($config, qw( FOO BAR )) || return undef;
+            return $self;
+        }
+
+        # ...plus other application-specific methods
+
+        1;
+
+    Then you can go right ahead and use it like this:
+
+        use My::Module;
+
+        my $object = My::Module->new( FOO => 'the foo value',
+                                      BAR => 'the bar value' )
+            || die $My::Module::ERROR;
+
+    Despite its limitations, Class::Base can be a surprisingly useful module
+    to have lying around for those times where you just want to create a
+    regular object based on a blessed hash reference and don't want to worry
+    too much about duplicating the same old code to bless a hash, define
+    configuration values, provide an error reporting mechanism, and so on.
+    Simply derive your module from "Class::Base" and leave it to worry about
+    most of the detail. And don't forget, you can always redefine your own
+    "new()", "error()", or other method, if you don't like the way the
+    Class::Base version works.
 
   Subclassing Class::Base
 
@@ -95,6 +155,29 @@ DESCRIPTION
             foo => 'bar', 
             wiz => 'waz'
         );
+
+    Within the "init()" method, you can either handle the configuration
+    yourself:
+
+        sub init {
+            my ($self, $config) = @_;
+
+            $self->{ file } = $config->{ file }
+                || return $self->error('no file specified');
+
+            return $self;
+        }
+
+    or you can call the "params()" method to do it for you:
+
+        sub init {
+            my ($self, $config) = @_;
+
+            $self->params($config, 'file')
+                || return $self->error('no file specified');
+
+            return $self;
+        }
 
   Error Handling
 
@@ -274,7 +357,67 @@ METHODS
 
             return $self;
         }
-    
+
+  params($config, @keys)
+
+    The "params()" method accept a reference to a hash array as the first
+    argument containing configuration values such as those passed to the
+    "init()" method. The second argument can be a reference to a list of
+    parameter names or a reference to a hash array mapping parameter names
+    to default values. If the second argument is not a reference then all
+    the remaining arguments are taken as parameter names. Thus the method
+    can be called as follows:
+
+        sub init {
+            my ($self, $config) = @_;
+
+            # either...
+            $self->params($config, qw( foo bar ));
+
+            # or...
+            $self->params($config, [ qw( foo bar ) ]);
+
+            # or...
+            $self->params($config, { foo => 'default foo value',
+                                     bar => 'default bar value' } );
+
+            return $self;
+        }
+
+    The method looks for values in $config corresponding to the keys
+    specified and copies them, if defined, into $self.
+
+    Keys can be specified in UPPER CASE and the method will look for either
+    upper or lower case equivalents in the "$config" hash. Thus you can call
+    "params()" from "init()" like so:
+
+        sub init {
+            my ($self, $config) = @_;
+            $self->params($config, qw( FOO BAR ))
+            return $self;
+        }
+
+    but use either case for parameters passed to "new()":
+
+        my $object = My::Module->new( FOO => 'the foo value',
+                                      BAR => 'the bar value' )
+            || die My::Module->error();
+
+        my $object = My::Module->new( foo => 'the foo value',
+                                      bar => 'the bar value' )
+            || die My::Module->error();
+
+    Note however that the internal key within "$self" used to store the
+    value will be in the case provided in the call to "params()" (upper case
+    in this example). The method doesn't look for upper case equivalents
+    when they are specified in lower case.
+
+    When called in list context, the method returns a list of all the values
+    corresponding to the list of keys, some of which may be undefined
+    (allowing you to determine which values were successfully set if you
+    need to). When called in scalar context it returns a reference to the
+    same list.
+
   clone()
 
     The "clone()" method performs a simple shallow copy of the object hash
@@ -346,6 +489,9 @@ METHODS
 
 AUTHOR
     Andy Wardley <abw@kfs.org>
+
+VERSION
+    This is version 0.03 of Class::Base.
 
 HISTORY
     This module began life as the Template::Base module distributed as part

@@ -11,7 +11,7 @@
 # This is free software; you can redistribute it and/or modify it
 # under the same terms as Perl itself.
 #
-# $Id$
+# $Id: test.pl,v 1.1.1.1 2002/04/05 09:29:34 abw Exp $
 #
 #========================================================================
 
@@ -24,14 +24,15 @@ use Class::Base;
 #------------------------------------------------------------------------
 # mini test harness
 #------------------------------------------------------------------------
+# use Test::More tests => 93;
 
-print "1..70\n";
+print "1..93\n";
 my $n = 0;
 
 sub ok {
     my ($flag, $msg) = @_;
     print(($flag ? 'ok ' : 'not ok '), ++$n, 
-	  defined $msg ? " - $msg\n" : "\n");
+	    defined $msg ? " - $msg\n" : "\n");
     return $flag;
 }
 
@@ -321,4 +322,117 @@ $a->two(29);
 $b->one(31);
 $b->two(37);
 is( $stderr, "[Some::Class] one(31)\n[Some::Class] two(37)\n",
-    'output 3 matches')
+    'output 3 matches');
+
+#------------------------------------------------------------------------
+# test params() method
+#------------------------------------------------------------------------
+
+package My::Params::Test;
+use base qw( Class::Base );
+
+sub init {
+    my ($self, $config) = @_;
+
+    my ($one, $two, $three) = $self->params($config, qw( ONE TWO THREE ))
+	|| return;
+
+    return $self;
+}
+
+package main;
+
+$pkg = 'My::Params::Test';
+$obj = $pkg->new();
+ok( $obj, 'got an object' );
+ok( ! exists $obj->{ ONE }, 'ONE does not exist' );
+
+$obj = $pkg->new( ONE => 2 );
+ok( $obj, 'got an object' );
+is( $obj->{ ONE }, 2, 'ONE is 2' );
+
+$obj = $pkg->new( one => 3, TWO => 4 );
+ok( $obj, 'got an object' );
+is( $obj->{ ONE }, 3, 'ONE is 3' );
+is( $obj->{ TWO }, 4, 'TWO is 4' );
+ok( ! exists $obj->{ THREE }, 'THREE does not exist' );
+
+
+#------------------------------------------------------------------------
+# same passing list of args
+#------------------------------------------------------------------------
+
+package My::Other::Params::Test;
+use base qw( Class::Base );
+
+sub init {
+    my ($self, $config) = @_;
+
+    my ($one, $two, $three) = $self->params($config, [ qw( ONE TWO THREE ) ])
+	|| return;
+
+    return $self;
+}
+
+package main;
+
+$pkg = 'My::Params::Test';
+$obj = $pkg->new();
+ok( $obj, 'got a list ref object' );
+ok( ! exists $obj->{ ONE }, 'ONE does not exist' );
+
+$obj = $pkg->new( ONE => 2 );
+is( $obj->{ ONE }, 2, 'ONE is 2' );
+
+$obj = $pkg->new( one => 3, TWO => 4 );
+is( $obj->{ ONE }, 3, 'ONE is 3' );
+is( $obj->{ TWO }, 4, 'TWO is 4' );
+ok( ! exists $obj->{ THREE }, 'THREE does not exist' );
+
+#------------------------------------------------------------------------
+# same passing hash of defaults
+#------------------------------------------------------------------------
+
+package My::Hash::Params::Test;
+use base qw( Class::Base );
+
+sub init {
+    my ($self, $config) = @_;
+
+    my ($one, $two, $three) = $self->params($config, {
+	FOO => 'the foo item',
+	BAR => undef,
+	BAZ => \&baz,
+    }) || return;
+
+    return $self;
+}
+
+sub baz {
+    my ($self, $key, $value) = @_;
+    $value = '<undef>' unless defined $value;
+    $self->{ MSG } = "$key set to $value";
+    $self->{ BAZ } = $value;
+}
+
+package main;
+
+$pkg = 'My::Hash::Params::Test';
+$obj = $pkg->new();
+ok( $obj, 'got a hash ref object' );
+is( $obj->{ FOO }, 'the foo item', 'foo default set' );
+ok( ! exists $obj->{ BAR }, 'BAR does not exist' );
+is( $obj->{ BAZ }, '<undef>', 'BAZ is undef' );
+is( $obj->{ MSG }, 'BAZ set to <undef>', 'BAZ is undef' );
+
+$obj = $pkg->new( foo => 'hello world',
+		  bar => 99,
+		  baz => 'bazmatic' );
+
+is( $obj->{ FOO }, 'hello world', 'foo set' );
+is( $obj->{ BAR }, '99', 'bar set' );
+is( $obj->{ BAZ }, 'bazmatic', 'baz is set' );
+is( $obj->{ MSG }, 'BAZ set to bazmatic', 'MSG is set' );
+
+
+

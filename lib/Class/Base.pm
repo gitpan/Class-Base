@@ -16,7 +16,7 @@
 #   modify it under the same terms as Perl itself.
 #
 # REVISION
-#   $Id$
+#   $Id: Base.pm,v 1.2 2002/04/05 09:48:51 abw Exp $
 #
 #========================================================================
 
@@ -24,8 +24,8 @@ package Class::Base;
 
 use strict;
 
-our $VERSION  = '0.02';
-our $REVISION = sprintf("%d.%02d", q$Revision$ =~ /(\d+)\.(\d+)/);
+our $VERSION  = '0.03';
+our $REVISION = sprintf("%d.%02d", q$Revision: 1.2 $ =~ /(\d+)\.(\d+)/);
 
 
 #------------------------------------------------------------------------
@@ -146,6 +146,73 @@ sub id {
 
 
 #------------------------------------------------------------------------
+# params($vals, @keys)
+# params($vals, \@keys)
+# params($vals, \%keys)
+#
+# Utility method to examine the $config hash for any keys specified in
+# @keys and copy the values into $self.  Keys should be specified as a 
+# list or reference to a list of UPPER CASE names.  The method looks 
+# for either the name in either UPPER or lower case in the $config 
+# hash and copies the value, if defined, into $self.  The keys can 
+# also be specified as a reference to a hash containing default values
+# or references to handler subroutines which will be called, passing 
+# ($self, $config, $UPPER_KEY_NAME) as arguments.
+#------------------------------------------------------------------------
+
+sub params {
+    my $self = shift;
+    my $vals = shift;
+    my ($keys, @names);
+    my ($key, $lckey, $default, $value, @values);
+
+
+    if (@_) {
+	if (ref $_[0] eq 'ARRAY') {
+	    $keys  = shift;
+	    @names = @$keys;
+	    $keys  = { map { ($_, undef) } @names };
+	}
+	elsif (ref $_[0] eq 'HASH') {
+	    $keys  = shift;
+	    @names = keys %$keys;
+	}
+	else {
+	    @names = @_;
+	    $keys  = { map { ($_, undef) } @names };
+	}
+    }
+    else {
+	$keys = { };
+    }
+
+    foreach $key (@names) {
+	$lckey = lc $key;
+
+	# look for value provided in $vals hash
+	defined($value = $vals->{ $key })
+	    || ($value = $vals->{ $lckey });
+
+	# look for default which may be a code handler
+	if (defined ($default = $keys->{ $key })
+	    && ref $default eq 'CODE') {
+	    eval {
+		$value = &$default($self, $key, $value);
+	    };
+	    return $self->error($@) if $@;
+	}
+	else {
+	    $value = $default unless defined $value;
+	    $self->{ $key } = $value if defined $value;
+	}
+	push(@values, $value);
+	delete @$vals{ $key, lc $key };
+    }
+    return wantarray ? @values : \@values;
+}
+
+
+#------------------------------------------------------------------------
 # debug(@args)
 #
 # Debug method which prints all arguments passed to STDERR if and only if
@@ -159,12 +226,13 @@ sub debug {
     my $self  = shift;
     my ($flag);
 
-    if (ref $self) {
+    if (ref $self && defined $self->{ _DEBUG }) {
 	$flag = $self->{ _DEBUG };
     }
     else {
 	# go looking for package variable
 	no strict 'refs';
+	$self = ref $self || $self;
 	$flag = ${"$self\::DEBUG"};
     }
 
@@ -211,12 +279,16 @@ Class::Base - useful base class for deriving other modules
     use base qw( Class::Base );
 
     # custom initialiser method
-
     sub init {
 	my ($self, $config) = @_;
 
+	# copy various params into $self
+	$self->params($config, qw( FOO BAR BAZ ))
+	    || return undef;
+
 	# to indicate a failure
-	return $self->error('bad constructor!');
+	return $self->error('bad constructor!') 
+	    if $something_bad;
 
 	# or to indicate general happiness and well-being
 	return $self;
@@ -242,19 +314,77 @@ Class::Base - useful base class for deriving other modules
 =head1 DESCRIPTION
 
 This module implements a simple base class from which other modules
-can be derived, thereby inheriting a number of useful methods.
+can be derived, thereby inheriting a number of useful methods such as
+C<new()>, C<init()>, C<params()>, C<clone()>, C<error()> and
+C<debug()>.
 
 For a number of years, I found myself re-writing this module for
 practically every Perl project of any significant size.  Or rather, I
 would copy the module from the last project and perform a global
-search and replace to change the names.  Eventually, I decided to Do
-The Right Thing and release it as a module in it's own right.
+search and replace to change the names.  Each time it got a little
+more polished and eventually, I decided to Do The Right Thing and
+release it as a module in it's own right.
 
-It defines a base class which implements a number of useful methods
-like C<new()>, C<init()>, C<clone()> and C<error()>.  Eventually, you
-will be able to mix-in other base class module to provide additional
-functionality to your objects in an easy and consistent manner.  I
-just haven't got around to releasing those modules... yet.
+It doesn't pretend to be an all-encompassing solution for every kind
+of object creation problem you might encounter.  In fact, it only
+supports blessed hash references that are created using the popular,
+but by no means universal convention of calling C<new()> with a list
+or reference to a hash array of named parameters.  Constructor failure
+is indicated by returning undef and setting the C<$ERROR> package
+variable in the module's class to contain a relevant message (which
+you can also fetch by calling C<error()> as a class method).
+
+e.g.
+
+    my $object = My::Module->new( 
+	file => 'myfile.html',
+	msg  => 'Hello World'
+    ) || die $My::Module::ERROR;
+
+or:
+
+    my $object = My::Module->new({
+	file => 'myfile.html',
+	msg  => 'Hello World',
+    }) || die My::Module->error();
+
+The C<new()> method handles the conversion of a list of arguments 
+into a hash array and calls the C<init()> method to perform any 
+initialisation.  In many cases, it is therefore sufficient to define
+a module like so:
+
+    package My::Module;
+    use Class::Base;
+    use base qw( Class::Base );
+
+    sub init {
+	my ($self, $config) = @_;
+	# copy some config items into $self
+	$self->params($config, qw( FOO BAR )) || return undef;
+	return $self;
+    }
+
+    # ...plus other application-specific methods
+
+    1;
+
+Then you can go right ahead and use it like this:
+
+    use My::Module;
+
+    my $object = My::Module->new( FOO => 'the foo value',
+				  BAR => 'the bar value' )
+        || die $My::Module::ERROR;
+
+Despite its limitations, Class::Base can be a surprisingly useful
+module to have lying around for those times where you just want to
+create a regular object based on a blessed hash reference and don't
+want to worry too much about duplicating the same old code to bless a
+hash, define configuration values, provide an error reporting
+mechanism, and so on.  Simply derive your module from C<Class::Base>
+and leave it to worry about most of the detail.  And don't forget, you
+can always redefine your own C<new()>, C<error()>, or other method, if
+you don't like the way the Class::Base version works.
 
 =head2 Subclassing Class::Base
 
@@ -302,6 +432,29 @@ passing to the C<init()> method.  Thus, the following are equivalent:
 	foo => 'bar', 
 	wiz => 'waz'
     );
+
+Within the C<init()> method, you can either handle the configuration
+yourself:
+
+    sub init {
+	my ($self, $config) = @_;
+
+	$self->{ file } = $config->{ file }
+	    || return $self->error('no file specified');
+
+	return $self;
+    }
+
+or you can call the C<params()> method to do it for you:
+
+    sub init {
+	my ($self, $config) = @_;
+
+	$self->params($config, 'file')
+	    || return $self->error('no file specified');
+
+	return $self;
+    }
 
 =head2 Error Handling
 
@@ -483,7 +636,67 @@ method.
 
 	return $self;
     }
-    
+
+=head2 params($config, @keys)
+
+The C<params()> method accept a reference to a hash array as the 
+first argument containing configuration values such as those passed
+to the C<init()> method.  The second argument can be a reference to 
+a list of parameter names or a reference to a hash array mapping 
+parameter names to default values.  If the second argument is not
+a reference then all the remaining arguments are taken as parameter
+names.  Thus the method can be called as follows:
+
+    sub init {
+        my ($self, $config) = @_;
+
+	# either...
+	$self->params($config, qw( foo bar ));
+
+	# or...
+	$self->params($config, [ qw( foo bar ) ]);
+
+	# or...
+	$self->params($config, { foo => 'default foo value',
+				 bar => 'default bar value' } );
+
+	return $self;
+    }
+
+The method looks for values in $config corresponding to the keys
+specified and copies them, if defined, into $self.
+
+Keys can be specified in UPPER CASE and the method will look for 
+either upper or lower case equivalents in the C<$config> hash.  Thus
+you can call C<params()> from C<init()> like so:
+
+    sub init {
+        my ($self, $config) = @_;
+        $self->params($config, qw( FOO BAR ))
+        return $self;
+    }
+
+but use either case for parameters passed to C<new()>:
+
+    my $object = My::Module->new( FOO => 'the foo value',
+				  BAR => 'the bar value' )
+	|| die My::Module->error();
+
+    my $object = My::Module->new( foo => 'the foo value',
+				  bar => 'the bar value' )
+	|| die My::Module->error();
+
+Note however that the internal key within C<$self> used to store the
+value will be in the case provided in the call to C<params()> (upper
+case in this example).  The method doesn't look for upper case
+equivalents when they are specified in lower case.
+
+When called in list context, the method returns a list of all the
+values corresponding to the list of keys, some of which may be
+undefined (allowing you to determine which values were successfully
+set if you need to).  When called in scalar context it returns a 
+reference to the same list.
+
 =head2 clone()
 
 The C<clone()> method performs a simple shallow copy of the object
@@ -556,6 +769,10 @@ which will be returned by subsequent calls to C<id()>.
 =head1 AUTHOR
 
 Andy Wardley E<lt>abw@kfs.orgE<gt>
+
+=head1 VERSION
+
+This is version 0.03 of Class::Base.
 
 =head1 HISTORY
 
