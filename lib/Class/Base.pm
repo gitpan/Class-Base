@@ -24,7 +24,7 @@ package Class::Base;
 
 use strict;
 
-our $VERSION  = '0.01';
+our $VERSION  = '0.02';
 our $REVISION = sprintf("%d.%02d", q$Revision$ =~ /(\d+)\.(\d+)/);
 
 
@@ -46,9 +46,17 @@ sub new {
     my $config = defined $_[0] && UNIVERSAL::isa($_[0], 'HASH') 
 	? shift : { @_ };
 
+    no strict 'refs';
+    my $debug = defined $config->{ debug } 
+                      ? $config->{ debug }
+              : defined $config->{ DEBUG }
+                      ? $config->{ DEBUG }
+                      : ( ${"$class\::DEBUG"} || 0 );
+
     my $self = bless {
-	_ERROR   => '',
-	_FACTORY => $config->{ factory },
+	_ID    => $config->{ id    } || $config->{ ID    } || $class,
+	_DEBUG => $debug,
+	_ERROR => '',
     }, $class;
 
     return $self->init($config)
@@ -72,6 +80,19 @@ sub init {
 
 
 #------------------------------------------------------------------------
+# clone()
+#
+# Method to perform a simple clone of the current object hash and return
+# a new object.
+#------------------------------------------------------------------------
+
+sub clone {
+    my $self = shift;
+    bless { %$self }, ref($self);
+}
+
+
+#------------------------------------------------------------------------
 # error()
 # error($msg, ...)
 # 
@@ -87,6 +108,7 @@ sub error {
     my $errvar;
 
     { 
+	# get a reference to the object or package variable we're munging
 	no strict qw( refs );
 	$errvar = ref $self ? \$self->{ _ERROR } : \${"$self\::ERROR"};
     }
@@ -100,6 +122,82 @@ sub error {
     }
 }
 
+
+
+#------------------------------------------------------------------------
+# id($new_id)
+#
+# Method to get/set the internal _ID field which is used to identify
+# the object for the purposes of debugging, etc.
+#------------------------------------------------------------------------
+
+sub id {
+    my $self = shift;
+
+    # set _ID with $obj->id('foo')
+    return  ($self->{ _ID } = shift) if ref $self && @_;
+
+    # otherwise return id as $self->{ _ID } or class name 
+    my $id = $self->{ _ID } if ref $self;
+    $id ||= ref($self) || $self;
+
+    return $id;
+}
+
+
+#------------------------------------------------------------------------
+# debug(@args)
+#
+# Debug method which prints all arguments passed to STDERR if and only if
+# the appropriate DEBUG flag(s) are set.  If called as an object method
+# where the object has a _DEBUG member defined then the value of that 
+# flag is used.  Otherwise, the $DEBUG package variable in the caller's
+# class is used as the flag to enable/disable debugging. 
+#------------------------------------------------------------------------
+
+sub debug {
+    my $self  = shift;
+    my ($flag);
+
+    if (ref $self) {
+	$flag = $self->{ _DEBUG };
+    }
+    else {
+	# go looking for package variable
+	no strict 'refs';
+	$flag = ${"$self\::DEBUG"};
+    }
+
+    return unless $flag;
+
+    print STDERR '[', $self->id, '] ', @_;
+}
+
+
+#------------------------------------------------------------------------
+# debugging($flag)
+#
+# Method to turn debugging on/off (when called with an argument) or to 
+# retrieve the current debugging status (when called without).  Changes
+# to the debugging status are propagated to the $DEBUG variable in the 
+# caller's package.
+#------------------------------------------------------------------------
+
+sub debugging {
+    my $self  = shift;
+    my $class = ref $self;
+    my $flag;
+
+    no strict 'refs';
+
+    my $dbgvar = ref $self ? \$self->{ _DEBUG } : \${"$self\::DEBUG"};
+
+    return @_ ? ($$dbgvar = shift)
+	      :  $$dbgvar;
+
+}
+
+
 1;
 
 
@@ -111,6 +209,8 @@ Class::Base - useful base class for deriving other modules
 
     package My::Funky::Module;
     use base qw( Class::Base );
+
+    # custom initialiser method
 
     sub init {
 	my ($self, $config) = @_;
@@ -124,8 +224,20 @@ Class::Base - useful base class for deriving other modules
 
     package main;
 
+    # new() constructor folds args into hash and calls init()
     my $object = My::Funky::Module->new( foo => 'bar', ... )
 	  || die My::Funky::Module->error();
+
+    # error() class/object method to get/set errors
+    $object->error('something has gone wrong');
+    print $object->error();
+
+    # debugging() method (de-)activates the debug() method
+    $object->debugging(1);
+
+    # debug() prints to STDERR if debugging enabled
+    $object->debug('The ', $animal, ' sat on the ', $place);
+
 
 =head1 DESCRIPTION
 
@@ -139,10 +251,12 @@ search and replace to change the names.  Eventually, I decided to Do
 The Right Thing and release it as a module in it's own right.
 
 It defines a base class which implements a number of useful methods
-like new(), init() and error().  Eventually, you will be able to 
-mix-in other base class module to provide additional functionality
-to your objects in an easy and consistent manner.  I just haven't
-got around to releasing those modules... yet.
+like C<new()>, C<init()>, C<clone()> and C<error()>.  Eventually, you
+will be able to mix-in other base class module to provide additional
+functionality to your objects in an easy and consistent manner.  I
+just haven't got around to releasing those modules... yet.
+
+=head2 Subclassing Class::Base
 
 This module is what object-oriented afficionados would describe as an
 "abstract base class".  That means that it's not designed to be used
@@ -158,9 +272,11 @@ You can then use it like this:
 
     my $module = My::Funky::Module->new();
 
+=head2 Construction and Initialisation Methods
+
 If you want to apply any per-object initialisation, then simply write
-an init() method.  This gets called by the new() method which passes a
-reference to a hash reference of configuration options.
+an C<init()> method.  This gets called by the C<new()> method which
+passes a reference to a hash reference of configuration options.
 
     sub init {
 	my ($self, $config) = @_;
@@ -170,10 +286,10 @@ reference to a hash reference of configuration options.
 	return $self;
     }
 
-When you create new objects using the new() method you can either pass
-a hash reference or list of named arguments.  The new() method does
-the right thing to fold named arguments into a hash reference for
-passing to the init() method.  Thus, the following are equivalent:
+When you create new objects using the C<new()> method you can either
+pass a hash reference or list of named arguments.  The C<new()> method
+does the right thing to fold named arguments into a hash reference for
+passing to the C<init()> method.  Thus, the following are equivalent:
 
     # hash reference
     my $module = My::Funky::Module->new({ 
@@ -187,10 +303,12 @@ passing to the init() method.  Thus, the following are equivalent:
 	wiz => 'waz'
     );
 
-The init() method should return $self to indicate success or undef to
-indicate a failure.  You can use the error() method to report an error
-within the init() method.  The error() method returns undef, so you can
-use it like this:
+=head2 Error Handling
+
+The C<init()> method should return $self to indicate success or undef
+to indicate a failure.  You can use the C<error()> method to report an
+error within the C<init()> method.  The C<error()> method returns undef,
+so you can use it like this:
 
     sub init {
 	my ($self, $config) = @_;
@@ -202,30 +320,31 @@ use it like this:
 	return $self;
     }
 
-When you create objects of this class via new(), you should now check
-the return value.  If undef is returned then the error message can be
-retrieved by calling error() as a class method.
+When you create objects of this class via C<new()>, you should now
+check the return value.  If undef is returned then the error message
+can be retrieved by calling C<error()> as a class method.
 
     my $module = My::Funky::Module->new()
   	  || die My::Funky::Module->error();
 
-Alternately, you can inspect the $ERROR package variable which will
+Alternately, you can inspect the C<$ERROR> package variable which will
 contain the same error message.
 
     my $module = My::Funky::Module->new()
   	 || die $My::Funky::Module::ERROR;
 
 Of course, being a conscientious Perl programmer, you will want to be
-sure that the $ERROR package variable is correctly defined.
+sure that the C<$ERROR> package variable is correctly defined.
 
     package My::Funky::Module
     use base qw( Class::Base );
-    use vars qw( $ERROR );
 
-You can also call error() as an object method.  If you pass an argument
-then it will be used to set the internal error message for the object
-and return undef.  Typically this is used within the module methods
-to report errors.
+    our $ERROR;
+
+You can also call C<error()> as an object method.  If you pass an
+argument then it will be used to set the internal error message for
+the object and return undef.  Typically this is used within the module
+methods to report errors.
 
     sub another_method {
 	my $self = shift;
@@ -236,7 +355,7 @@ to report errors.
 	return $self->error('something bad happened');
     }
 
-If you don't pass an argument then the error() method returns the
+If you don't pass an argument then the C<error()> method returns the
 current error value.  Typically this is called from outside the object
 to determine its status.  For example:
 
@@ -246,6 +365,194 @@ to determine its status.  For example:
     $object->another_method()
 	|| die $object->error();
 
+=head2 Debugging Methods
+
+The module implements two methods to assist in writing debugging code:
+debug() and debugging().  Debugging can be enabled on a per-object or
+per-class basis, or as a combination of the two.
+
+When creating an object, you can set the C<DEBUG> flag (or lower case
+C<debug> if you prefer) to enable or disable debugging for that one
+object.
+
+    my $object = My::Funky::Module->new( debug => 1 )
+          || die My::Funky::Module->error();
+
+    my $object = My::Funky::Module->new( DEBUG => 1 )
+          || die My::Funky::Module->error();
+
+If you don't explicitly specify a debugging flag then it assumes the 
+value of the C<$DEBUG> package variable in your derived class or 0 if 
+that isn't defined.
+
+You can also switch debugging on or off via the C<debugging()> method.
+
+    $object->debugging(0);	# debug off
+    $object->debugging(1);	# debug on
+
+The C<debug()> method examines the internal debugging flag (the
+C<_DEBUG> member within the C<$self> hash) and if it finds it set to
+any true value then it prints to STDERR all the arguments passed to
+it.  The output is prefixed by a tag containing the class name of the
+object in square brackets (but see the C<id()> method below for
+details on how to change that value).
+
+For example, calling the method as:
+
+    $object->debug('foo', 'bar');   
+
+prints the following output to STDERR:
+
+    [My::Funky::Module] foobar
+
+When called as class methods, C<debug()> and C<debugging()> instead
+use the C<$DEBUG> package variable in the derived class as a flag to
+control debugging.  This variable also defines the default C<DEBUG>
+flag for any objects subsequently created via the new() method.
+
+    package My::Funky::Module
+    use base qw( Class::Base );
+
+    our $ERROR;
+    our $DEBUG = 0 unless defined $DEBUG;
+
+    # some time later, in a module far, far away
+    package main;
+
+    # debugging off (by default)
+    my $object1 = My::Funky::Module->new();
+
+    # turn debugging on for My::Funky::Module objects
+    $My::Funky::Module::DEBUG = 1;
+
+    # alternate syntax
+    My::Funky::Module->debugging(1);
+
+    # debugging on (implicitly from $DEBUG package var)
+    my $object2 = My::Funky::Module->new();
+
+    # debugging off (explicit override)
+    my $object3 = My::Funky::Module->new(debug => 0);
+
+If you call C<debugging()> without any arguments then it returns the
+value of the internal object flag or the package variable accordingly.
+
+    print "debugging is turned ", $object->debugging() ? 'on' : 'off';
+
+=head1 METHODS
+
+=head2 new()
+
+Class constructor method which expects a reference to a hash array of parameters 
+or a list of C<name =E<gt> value> pairs which are automagically folded into 
+a hash reference.  The method blesses a hash reference and then calls the 
+C<init()> method, passing the reference to the hash array of configuration 
+parameters.  
+
+Returns a reference to an object on success or undef on error.  In the latter
+case, the C<error()> method can be called as a class method, or the C<$ERROR>
+package variable (in the derived class' package) can be inspected to return an
+appropriate error message.
+
+    my $object = My::Class->new( foo => 'bar' )	  # params list
+	 || die $My::Class::$ERROR;               # package var
+
+or
+
+    my $object = My::Class->new({ foo => 'bar' }) # params hashref
+	  || die My::Class->error;                # class method
+
+
+=head2 init(\%config)
+
+Object initialiser method which is called by the C<new()> method, passing
+a reference to a hash array of configuration parameters.  The method may
+be derived in a subclass to perform any initialisation required.  It should
+return C<$self> on success, or C<undef> on error, via a call to the C<error()>
+method.
+
+    package My::Module;
+    use base qw( Class::Base );
+
+    sub init {
+	my ($self, $config) = @_;
+
+	# let's make 'foobar' a mandatory argument
+	$self->{ foobar } = $config->{ foobar }
+	    || return $self->error("no foobar argument");
+
+	return $self;
+    }
+    
+=head2 clone()
+
+The C<clone()> method performs a simple shallow copy of the object
+hash and creates a new object blessed into the same class.  You may
+want to provide your own C<clone()> method to perform a more complex
+cloning operation.
+
+    my $clone = $object->clone();
+
+=head2 error($msg, ...)
+
+General purpose method for getting and setting error messages.  When 
+called as a class method, it returns the value of the C<$ERROR> package
+variable (in the derived class' package) if called without any arguments,
+or sets the same variable when called with one or more arguments.  Multiple
+arguments are concatenated together.
+
+    # set error
+    My::Module->error('set the error string');
+    My::Module->error('set ', 'the ', 'error string');
+
+    # get error
+    print My::Module->error();
+    print $My::Module::ERROR;
+
+When called as an object method, it operates on the C<_ERROR> member
+of the object, returning it when called without any arguments, or
+setting it when called with arguments.
+
+    # set error
+    $object->error('set the error string');
+
+    # get error
+    print $object->error();
+
+The method returns C<undef> when called with arguments.  This allows it
+to be used within object methods as shown:
+
+    sub my_method {
+	my $self = shift;
+
+	# set error and return undef in one
+	return $self->error('bad, bad, error')
+	    if $something_bad;
+    }
+
+=head2 debug($msg, $msg, ...)
+
+Prints all arguments to STDERR if the internal C<_DEBUG> flag (when
+called as an object method) or C<$DEBUG> package variable (when called
+as a class method) is set to a true value.  Otherwise does nothing.
+The output is prefixed by a string of the form "[Class::Name]" where
+the name of the class is that returned by the C<id()> method.
+
+=head2 debugging($flag)
+
+Used to get (no arguments) or set ($flag defined) the value of the
+internal C<_DEBUG> flag (when called as an object method) or C<$DEBUG>
+package variable (when called as a class method).
+
+=head2 id($newid)
+
+The C<debug()> method calls this method to return an identifier for
+the object for printing in the debugging message.  By default it
+returns the class name of the object (i.e. C<ref $self>), but you can
+of course subclass the method to return some other value.  When called
+with an argument it uses that value to set its internal C<_ID> field
+which will be returned by subsequent calls to C<id()>.
+
 =head1 AUTHOR
 
 Andy Wardley E<lt>abw@kfs.orgE<gt>
@@ -254,6 +561,9 @@ Andy Wardley E<lt>abw@kfs.orgE<gt>
 
 This module began life as the Template::Base module distributed as 
 part of the Template Toolkit. 
+
+Thanks to Brian Moseley and Matt Sergeant for suggesting various
+enhancments, some of which went into version 0.02.
 
 =head1 COPYRIGHT
 

@@ -25,17 +25,42 @@ use Class::Base;
 # mini test harness
 #------------------------------------------------------------------------
 
-print "1..15\n";
+print "1..70\n";
 my $n = 0;
 
 sub ok {
-    shift or print "not ";
-    print "ok ", ++$n, "\n";
+    my ($flag, $msg) = @_;
+    print(($flag ? 'ok ' : 'not ok '), ++$n, 
+	  defined $msg ? " - $msg\n" : "\n");
+    return $flag;
 }
 
 sub is {
-    ok( $_[0] eq $_[1] );
+    my ($a, $b, @msg) = @_;
+    ok( $a eq $b, @msg );
 }
+
+#------------------------------------------------------------------------
+# quick hack to allow STDERR to be tied to a variable.
+#------------------------------------------------------------------------
+
+package Tie::File2Str;
+
+sub TIEHANDLE {
+    my ($class, $textref) = @_;
+    bless $textref, $class;
+}
+sub PRINT {
+    my $self = shift;
+    $$self .= join('', @_);
+}
+
+
+package main;
+
+# tie STDERR to a variable
+my $stderr = '';
+tie(*STDERR, "Tie::File2Str", \$stderr);
 
 
 #------------------------------------------------------------------------
@@ -107,4 +132,193 @@ ok( $mod );
 ok( ! $mod->error() );
 is( $mod->name(), 'foo' );
 
+#------------------------------------------------------------------------
+# test clone() method
+#------------------------------------------------------------------------
 
+my $clone = $mod->clone();
+ok( $mod );
+ok( ! $mod->error() );
+is( $mod->name(), 'foo', 'clone is ok' );
+
+
+#------------------------------------------------------------------------
+# test id method and constructor parameters
+#------------------------------------------------------------------------
+
+my $obj = Class::Base->new();
+ok( $obj );
+ok( $obj->id eq 'Class::Base' );
+ok( $obj->id('foo') eq 'foo' );
+
+$obj = Class::Base->new( ID => 'foo' );
+ok( $obj );
+ok( $obj->id eq 'foo' );
+
+$obj = Class::Base->new( id => 'bar' );
+ok( $obj );
+ok( $obj->id eq 'bar' );
+ok( $obj->id('baz') eq 'baz' );
+ok( $obj->id eq 'baz' );
+
+package My::Class::Base;
+use base qw( Class::Base );
+our $DEBUG;
+
+package main;
+
+$obj = My::Class::Base->new( );
+ok( $obj );
+ok( $obj->id() eq 'My::Class::Base' );
+
+$obj = My::Class::Base->new( ID => 'wiz', DEBUG => 1 );
+ok( $obj );
+ok( $obj->id() eq 'wiz' );
+$stderr = '';
+$obj->debug('hello world');
+ok( $stderr eq '[wiz] hello world' ) 
+    or print "stderr is [$stderr] not '[wiz] hello world'\n";
+
+#------------------------------------------------------------------------
+# test debugging method and params
+#------------------------------------------------------------------------
+
+$obj = Class::Base->new( );
+ok( $obj, 'debugging object created' );
+ok( ! $obj->debugging );
+ok(   $obj->debugging(1) );
+ok(   $obj->debugging );
+
+$obj = Class::Base->new( debug => 1 );
+ok( $obj );
+ok(   $obj->debugging );
+ok( ! $obj->debugging(0) );
+ok( ! $obj->debugging );
+
+$obj = Class::Base->new( DEBUG => 1 );
+ok( $obj );
+ok(   $obj->debugging );
+ok( ! $obj->debugging(0) );
+ok( ! $obj->debugging );
+
+$obj = My::Class::Base->new( );
+ok( $obj );
+ok( ! $obj->debugging );
+ok( ! $My::Class::Base::DEBUG );
+$stderr = '';
+$obj->debug('hello world');
+ok( ! $stderr ) or print "stderr is [$stderr] not empty'\n";
+
+
+# no explicit debug flag set in object, so should use package var
+$My::Class::Base::DEBUG = 1;
+ok( ! $obj->debugging, 'object is not debugging' );
+ok( My::Class::Base->debugging, 'class is debugging' );
+$stderr = '';
+$obj->debug('hello world');
+ok( ! $stderr, 'stderr is empty' );
+My::Class::Base->debug('hello world');
+ok( $stderr eq '[My::Class::Base] hello world' ) 
+    or print "stderr is [$stderr] not '[My::Class::Base] hello world'\n";
+
+# now we set an object debug flag which should also change pkg var
+$obj->debugging(0);
+ok( ! $obj->debugging, 'object debuggin off' );
+ok( $My::Class::Base::DEBUG, 'class debugging on' );
+$stderr = '';
+$obj->debug('hello world');
+ok( ! $stderr ) 
+    or print "stderr is [$stderr] not empty\n";
+
+# now that object has debug value defined, it not longer uses pkg var
+$My::Class::Base::DEBUG = 1;
+ok( ! $obj->debugging );
+$obj->debug('hello world');
+ok( ! $stderr ) 
+    or print "stderr is [$stderr] not empty\n";
+
+# test debugging works as class method
+My::Class::Base->debugging(0);
+ok( ! $My::Class::Base::DEBUG );
+
+My::Class::Base->debugging(1);
+ok( $My::Class::Base::DEBUG );
+
+#------------------------------------------------------------------------
+# test package $DEBUG variable sets default object DEBUG flag
+#------------------------------------------------------------------------
+
+My::Class::Base->debugging(0);
+ok( ! $My::Class::Base::DEBUG, 'class debugging is off' );
+
+my $obj1 = My::Class::Base->new( );
+ok( $obj1, 'object 1 created' );
+ok( ! $obj1->debugging, 'object not debugging' );
+$stderr = '';
+$obj1->debug('foo');
+ok( ! $stderr, 'nothing printed' );
+
+My::Class::Base->debugging(1);
+ok( $My::Class::Base::DEBUG, 'class debugging is now on' );
+
+my $obj2 = My::Class::Base->new( );
+ok( $obj2, 'object 2 created' );
+ok( $obj2->debugging, 'object is debugging' );
+$stderr = '';
+$obj2->debug('foo');
+is( $stderr, '[My::Class::Base] foo', 'foo printed' );
+
+
+#------------------------------------------------------------------------
+# test package var $DEBUG influences debug flag of new objects
+#------------------------------------------------------------------------
+
+package Some::Class;
+use base qw( Class::Base );
+
+our $DEBUG = 0 unless defined $DEBUG;
+local $" = ', ';
+
+sub one {
+    my ($self, @args) = @_;
+    $self->debug("one(@args)\n");
+}
+
+sub two {
+    my ($self, @args) = @_;
+    $self->debug("two(@args)\n") if $DEBUG;
+}
+
+;
+
+package main;
+
+my $a = Some::Class->new(debug => 1);
+my $b = Some::Class->new(debug => 1);
+
+$stderr = '';
+$a->one(2);
+$a->two(3);
+$b->one(5);
+$b->two(7);
+is( $stderr, "[Some::Class] one(2)\n[Some::Class] one(5)\n",
+    'output 1 matches');
+
+$a->debugging(0);
+$stderr = '';
+$a->one(11);
+$a->two(13);
+$b->one(17);
+$b->two(19);
+is( $stderr, "[Some::Class] one(17)\n",
+    'output 2 matches');
+
+Some::Class->debugging(1);
+
+$stderr = '';
+$a->one(23);
+$a->two(29);
+$b->one(31);
+$b->two(37);
+is( $stderr, "[Some::Class] one(31)\n[Some::Class] two(37)\n",
+    'output 3 matches')
