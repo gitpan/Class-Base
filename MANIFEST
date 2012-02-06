@@ -1,7 +1,9 @@
-lib/Class/Base.pm
 Changes
-TODO
+lib/Class/Base.pm
 Makefile.PL
-MANIFEST
+MANIFEST			This list of files
 README
-test.pl
+t/test.t
+TODO
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)
